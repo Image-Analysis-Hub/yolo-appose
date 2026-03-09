@@ -5,6 +5,10 @@ import tifffile
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 
+from skimage import io
+from skimage import util as skutil
+from skimage.color import gray2rgb
+
 report = print
 def listen(callback):
     global report
@@ -32,9 +36,10 @@ def detect_sporozoites_yolo(model, image, slice_height=128, slice_width=128, ove
 
     return result
 
-# MAIN PART
-from skimage import io
+# MAIN PART 
+# =========================
 
+# Listen for Appose task updates.
 appose_mode = 'task' in globals()
 if appose_mode:
     listen(task.update)
@@ -59,15 +64,25 @@ def share_as_ndarray(img):
     return shared
 
 # Obtain the original image
+# TODO: since YOLO input is often RGB, but the input image can be grayscale
+# If input is grayscale, user need to specify input for training is grayscale or RGB (by duplicating channels)
+# Another issue is working with movie.
 if appose_mode:
+
+    # Retrieve the input image from Appose task inputs, and flip it to be NumPy-friendly.
     img = flip_img(img_apos.ndarray()) # img_apos is the input variable from Appose
-    task.update(f"Input image of shape: {img.shape}")
+    task.update(f"Image shape: {img.shape}")
+
+    # If the image is grayscale, convert it to RGB by duplicating channels.
+    if img.ndim == 2:
+        img = gray2rgb(skutil.img_as_ubyte(img))
+        task.update(f"Image is grayscale, converted to RGB: {img.shape}")
 else:
     path_to_img = "/data/IAH/DevProjects/yolosahi-fiji/images/sporozoite.tif"
     img = open_img(path_to_img)
-    print(img.shape)
+    print(f"Image shape: {img.shape}")
 
-# model_path = "/data/IAH/DevProjects/yolosahi-fiji/models/best.pt"
+# TODO: user can specify using GPU or CPU or we can automatically detect GPU availability and use GPU if available.
 detection_model = AutoDetectionModel.from_pretrained(
     model_type="ultralytics",
     model_path=model_path_apos, # model_path_apos is the input variable from Appose
@@ -75,6 +90,9 @@ detection_model = AutoDetectionModel.from_pretrained(
     # image_size=256, # important set it according to training image size
     device="cuda:0",  # 'cpu' or 'cuda:0'
 )
+
+if appose_mode:
+    task.update(f"Running YOLO from model at {model_path_apos}")
 
 # Run yolo-sahi detection
 result = detect_sporozoites_yolo(
@@ -123,6 +141,7 @@ if appose_mode:
     # task.update(f"Output bbox label of shape: {bbox_label.shape}, dtype: {bbox_label.dtype}, nb values: {len(np.unique(bbox_label))-1}")
     # task.outputs["bboxlabel"] = share_as_ndarray(flip_img(bbox_label))
     task.outputs["bboxtable"] = bboxtbl
+    task.update(f"There are {len(bboxtbl)} detected bounding boxes.")
 
 
 

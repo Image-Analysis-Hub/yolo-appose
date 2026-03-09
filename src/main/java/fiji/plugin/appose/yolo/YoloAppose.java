@@ -33,7 +33,6 @@ import ij.ImagePlus;
 import ij.WindowManager;
 import ij.gui.Overlay;
 import ij.gui.Roi;
-import net.imagej.ImageJ;
 import net.imagej.ImgPlus;
 import net.imglib2.appose.NDArrays;
 import net.imglib2.appose.ShmImg;
@@ -53,22 +52,10 @@ import javax.swing.JDialog;
 import javax.swing.JProgressBar;
 import javax.swing.WindowConstants;
 
-import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
-import java.awt.*;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-
 
 /*
- * This class implements an example of a classical Fiji plugin (not ImageJ2 plugin), 
- * that calls native Python code with Appose.
- * 
- * We use a simple examples of rotating an input image by 90 degrees, using the scikit-image 
- * library in Python, and returning the result back to Fiji. Everything is contained in a 
- * single class, but you can imagine restructuring the code and the Python script as you see fit.
+ * This class implements Fiji plugin that calls native Python code with Appose.
+ * The python code run YOLO from inputs given the Fiji plugin.
  */
 @Plugin(type = Command.class, menuPath = "Plugins>Yolo-Appose")
 public class YoloAppose extends DynamicCommand implements Initializable
@@ -78,22 +65,22 @@ public class YoloAppose extends DynamicCommand implements Initializable
     private LogService log;
 	
 	@Parameter(label = "Model path", style = "file")
-	private File ModelPath;
+	private File modelPath; // path to the model
 	
 	@Parameter( label = "Confidence threshold", min="0.", description="Confidence threshold [0,1]" )
-	private double ConfidenceThreshold = 0.5; // confidence threshold
+	private double confidenceThreshold = 0.5; // confidence threshold
 	
 	@Parameter( label = "Slice height", min="10", description="Slice height (in pixels)" )
-	private int SliceHeight = 128; // slice height
+	private int sliceHeight = 128; // slice height
 	
 	@Parameter( label = "Slice width", min="10", description="Slice width (in pixels)" )
-	private int SliceWidth = 128; // slice height
+	private int sliceWidth = 128; // slice height
 	
 	@Parameter( label = "Overlap height ratio", min="0.05", description="Overlap height ratio (in %)" )
-	private double OverlapHeightRatio = 0.2; // slice height
+	private double overlapHeightRatio = 0.2; // slice height
 	
 	@Parameter( label = "Overlap width ratio", min="0.05", description="Overlap width ratio (in %)" )
-	private double OverlapWidthRatio = 0.2; // slice height
+	private double overlapWidthRatio = 0.2; // slice height
 	
 	@Override
 	public void initialize() {
@@ -102,9 +89,8 @@ public class YoloAppose extends DynamicCommand implements Initializable
 	
 	/*
 	 * This is the entry point for the plugin. This is what is called when the
-	 * user select the plugin menu entry: 'Plugins>Yolo-Appose>Yolo appose' in our case. 
-	 * You can redefine this by editing
-	 * the file 'plugins.config' in the resources directory
+	 * user selects the plugin menu entry: 'Plugins>Yolo-Appose>Yolo appose'. 
+	 * You can redefine this by editing the file 'plugins.config' in the resources directory
 	 * (src/main/resources).
 	 */
 	@Override
@@ -113,11 +99,6 @@ public class YoloAppose extends DynamicCommand implements Initializable
 		// Grab the current image.
 		final ImagePlus imp = WindowManager.getCurrentImage();
 		
-		// Open image
-//		ImagePlus imp = IJ.openImage(ImageFile.getAbsolutePath());
-		
-//		imp.show();
-		
 		try
 		{
 			// Runs the processing code.
@@ -125,49 +106,53 @@ public class YoloAppose extends DynamicCommand implements Initializable
 		}
 		catch ( final IOException | BuildException e )
 		{
-			log.error( "An error occurred: " + e.getMessage() );
+			IJ.error( "An error occurred: " + e.getMessage() );
 		}
 	}
 
 	/*
-	 * Actually do something with the image.
+	 * Principle function to process image.
 	 */
 	public < T extends RealType< T > & NativeType< T > > void process( final ImagePlus imp ) throws IOException, BuildException
 	{
 		// Print os and arch info
-		System.out.println( "This machine os and arch:" );
-		System.out.println( "  " + System.getProperty( "os.name" ) );
-		System.out.println( "  " + System.getProperty( "os.arch" ) );
-		System.out.println();
+		IJ.log( "OS:  " + System.getProperty( "os.name" ) );
+		IJ.log( "Arch:  " + System.getProperty( "os.arch" ) );
 		
 		/*
-		 * Check the image type. If it is color RGB, then convert to composite image. 
-		 * Appose doesn't support color RGB.
-		 * TODO: update func to accept: 1 single channel, composite image with 3 channels and RGB image.
+		 * Check the image type. If it is colorRGB, then convert to composite 3 channels image.
+		 * Since Appose does not support colorRGB 24 bit.
 		 */
 		
 		final ImagePlus impPreprocessed = preprocess( imp );
 
 		/*
-		 * For this example we use pixi to create a Python environment with the
-		 * necessary dependencies. We load it from an existing file
+		 * Create Python environment with Pixi. We load it from an existing .toml file.
 		 */
-
-		// The environment spec.
-		final String yoloEnv = loadResource( "/scripts/pixi.toml" );
-		System.out.println( "The environment specs:" );
-		System.out.println( indent( yoloEnv ) );
-		System.out.println();
+		String yoloEnv = null;
+		try{
+			IJ.log( "Loading python environment." );
+			yoloEnv = loadResource( "/scripts/pixi.toml" );
+		}
+		catch(IOException e) {
+			IJ.error( "Failed to load environment specification: " + e.getMessage() );
+			return;
+		}
 
 		/*
-		 * The Python script that we want to run. It is loaded from an existing .py file. 
+		 * Python script that we want to run the service. It is loaded from an existing .py file. 
 		 */
-
-		// Get the script
-		final String script = loadResource( "/scripts/yolo-sahi-detector.py" );
-		System.out.println( "The analysis script" );
-		System.out.println( indent( script ) );
-		System.out.println();
+		
+		String script = null;
+		try{
+			IJ.log("Loading python script.");
+			script = loadResource( "/scripts/yolo-sahi-detector.py" );
+		}
+		catch(IOException e) {
+			IJ.error( "Failed to load Python script: " + e.getMessage() );
+			return;
+		}
+			
 
 		/*
 		 * The following wraps an ImageJ ImagePlus into an ImgLib2 Img, and then
@@ -185,17 +170,13 @@ public class YoloAppose extends DynamicCommand implements Initializable
 		 */
 
 		// Wrap the ImagePlus into a ImgLib2 image.
-		@SuppressWarnings( "unchecked" )
+		@SuppressWarnings( "unchecked")
 		final ImgPlus< T > img = rawWraps( impPreprocessed );
 
 		/*
 		 * Copy the image into a shared memory image and wrap it into an
 		 * NDArray, then store it in an input map that we will pass to the
 		 * Python script.
-		 * 
-		 * Note that we could have passed multiple inputs to the Python script
-		 * by putting more entries in the input map, and they would all be
-		 * available in the Python script as shared memory NDArrays.
 		 * 
 		 * A ND array is a multi-dimensional array that is stored in shared
 		 * memory, that can be unwrapped as a NumPy array in Python, and wrapped
@@ -208,26 +189,26 @@ public class YoloAppose extends DynamicCommand implements Initializable
 			inputs.put( "img_apos", NDArrays.asNDArray( img ) );
 		}
 		catch(IllegalArgumentException e) {
-			log.info( e.toString() );
+			IJ.error( e.toString() );
 		}
 		
-//		final Integer SliceHeight = 128;
-//		final Integer SliceWidth = 128;
-//		final Double OverlapHeightRatio = 0.2;
-//		final Double OverlapWidthRatio = 0.2;
+
+		/*
+		 * Put other parameters to inputs
+		 */
 		
-		inputs.put( "model_path_apos", ModelPath.getAbsolutePath() );
-		inputs.put( "confidence_threshold_apos", ConfidenceThreshold );
-		inputs.put( "slice_height_apos", SliceHeight );
-		inputs.put( "slice_width_apos", SliceWidth );
-		inputs.put( "overlap_height_ratio_apos", OverlapHeightRatio );
-		inputs.put( "overlap_width_ratio_apos", OverlapWidthRatio );
+		inputs.put( "model_path_apos", modelPath.getAbsolutePath() );
+		inputs.put( "confidence_threshold_apos", confidenceThreshold );
+		inputs.put( "slice_height_apos", sliceHeight );
+		inputs.put( "slice_width_apos", sliceWidth );
+		inputs.put( "overlap_height_ratio_apos", overlapHeightRatio );
+		inputs.put( "overlap_width_ratio_apos", overlapWidthRatio );
 		
 		/*
 		 * Create or retrieve the environment.
 		 * 
-		 * The first time this code is run, Appose will create the mamba
-		 * environment as specified by the cellposeEnv string, download and
+		 * The first time this code is run, Appose will create the 
+		 * environment as specified by the yoloEnv string, download and
 		 * install the dependencies. This can take a few minutes, but it is only
 		 * done once. The next time the code is run, Appose will just reuse the
 		 * existing environment, so it will start much faster.
@@ -239,7 +220,6 @@ public class YoloAppose extends DynamicCommand implements Initializable
 				.subscribeOutput( this::showProgress ) // report output visually
 				.subscribeError( IJ::log ) // log problems
 				.build(); // create the environment
-//		hideProgress();
 
 		/*
 		 * Using this environment, we create a service that will run the Python
@@ -257,11 +237,36 @@ public class YoloAppose extends DynamicCommand implements Initializable
 			 */
 			final Task task = python.task( script, inputs );
 
-			// Start the script, and return to Java immediately.
-			log.info( "Starting Appose task." );
-			final long start = System.currentTimeMillis();
-			task.start();
+			/*
+			 * Listen for updates from Python side.
+			 */
+	        task.listen(event -> {
+	            switch (event.responseType) {
 
+	                case UPDATE:
+	                    IJ.log("[Python backend]" + event.message);
+	                    break;
+
+	                case COMPLETION:
+	                    IJ.log("Task completed successfully.");
+	                    break;
+
+	                case CANCELATION:
+	                    IJ.log("Task was cancelled.");
+	                    break;
+
+	                case FAILURE:
+	                    IJ.error("Task failed", event.task.error);
+	                    break;
+	            }
+	        });
+	        
+	        // Start the script, and return to Java immediately.
+ 			IJ.log( "Starting Appose task." );
+	     			
+ 			final long start = System.currentTimeMillis();
+ 			task.start();
+	        
 			/*
 			 * Wait for the script to finish. This will block the Java thread
 			 * until the Python script is done, but it allows the Python code to
@@ -270,29 +275,14 @@ public class YoloAppose extends DynamicCommand implements Initializable
 			 */
 			task.waitFor();
 
-			// Verify that it worked.
-			if ( task.status != TaskStatus.COMPLETE )
-				throw new RuntimeException( "Python script failed with error: " + task.error );
-
 			// Benchmark.
 			final long end = System.currentTimeMillis();
-			log.info( "Task finished in " + ( end - start ) / 1000. + " s" );
+			IJ.log( "Task finished in " + ( end - start ) / 1000. + " s" );
 
 			/*
 			 * Unwrap output.
-			 * 
-			 * In the Python script (see below), we create a new NDArray called
-			 * 'rotated' that contains the result of the processing. Here we
-			 * retrieve this NDArray from the task outputs, and wrap it into a
-			 * ShmImg, which is an ImgLib2 image that is backed by shared
-			 * memory. We can then display this image with
-			 * ImageJFunctions.show(). Note that this does not involve any
-			 * copying of the data, as the NDArray and the ShmImg are both just
-			 * views on the same shared memory array.
+			 * The output from python is a list of dictionnary, each item is bbox information.
 			 */
-//			final NDArray maskArr = ( NDArray ) task.outputs.get( "bboxlabel" );
-//			final Img< T > output = new ShmImg<>( maskArr );
-//			ImageJFunctions.show( output );
 			
 			/**
 			 * Test getting bbox table
@@ -301,11 +291,18 @@ public class YoloAppose extends DynamicCommand implements Initializable
             List<Map<String, Object>> bboxes = (List<Map<String, Object>>) task.outputs.get("bboxtable");
 			
 			if (bboxes == null || bboxes.isEmpty()) {
-                IJ.showMessage("No detections found.");
+                IJ.log("No detections found.");
                 return;
             }
 			
-			// 6. Convert to Fiji ROIs
+//			IJ.log("There are " + bboxes.size() + " objects found.");
+			
+			/*
+			 * Convert to bbox coordinates to ROIs and put into RoiManager.
+			 */
+			
+			IJ.log("Adding to ROI manager.");
+			
             RoiManager rm = RoiManager.getInstance();
             if (rm == null) rm = new RoiManager();
 
@@ -337,15 +334,15 @@ public class YoloAppose extends DynamicCommand implements Initializable
                 overlay.add(roi);
             }
 
-            // 7. Display results
+            // Display results
             imp.setOverlay(overlay);
             imp.updateAndDraw();
-
-            log.info("YOLO detection complete: " + bboxes.size() + " objects found.");
             
             /*
-             * Display table
+             * Build a table to store bboxes.
              */
+            
+            IJ.log( "Generating result table." );
 
             // Show results table
             DetectionTableDialog tableDialog = new DetectionTableDialog();
@@ -354,20 +351,19 @@ public class YoloAppose extends DynamicCommand implements Initializable
 		}
 		catch ( Exception e )
 		{
-			// TODO Auto-generated catch block
-//			e.printStackTrace();
-			IJ.log( e.toString() );
+			IJ.error( e.toString() );
 		}
 	}
 	
 	private ImagePlus preprocess(ImagePlus imp) {
+		// TODO: update for movie
 		
 	    if (imp.getType() != ImagePlus.COLOR_RGB) {
 	    	
 	        return imp;
 	    }
 
-	    log.info( "Image is RGB, convert to composite stack." );
+	    IJ.log( "Image has type ColorRGB, convert to 3-channels composite image." );
 	    
 	    ImagePlus[] channels = ChannelSplitter.split(imp);
 
@@ -468,19 +464,5 @@ public class YoloAppose extends DynamicCommand implements Initializable
 		final ImgPlus< DoubleType > img = ImagePlusAdapter.wrapImgPlus( imp );
 		final ImgPlus raw = img;
 		return raw;
-	}
-
-	public static void main( final String[] args )
-	{
-		// Launch ImageJ2
-	    final ImageJ ij = new ImageJ();
-	    ij.ui().showUI();
-
-	    // Open an image BEFORE running the plugin
-	    IJ.openImage("samples/sporozoite/sporozoite.tif").show();
-
-	    // Run the plugin via ImageJ2 context (NOT new My_Plugin().run())
-	    ij.command().run(YoloAppose.class, true);
-		
 	}
 }
