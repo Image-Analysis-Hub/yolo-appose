@@ -1,8 +1,16 @@
 package fiji.plugin.appose.yolo;
 
+import java.awt.Checkbox;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.EventQueue;
 import java.awt.Font;
+import java.awt.Label;
+import java.awt.Panel;
+import java.awt.TextField;
 import java.awt.Window;
+import java.awt.event.ItemEvent;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -10,9 +18,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Vector;
 
 import org.apposed.appose.Appose;
 import org.apposed.appose.BuildException;
@@ -31,6 +41,7 @@ import org.scijava.plugin.Plugin;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.WindowManager;
+import ij.gui.GenericDialog;
 import ij.gui.Overlay;
 import ij.gui.Roi;
 import net.imagej.ImgPlus;
@@ -61,26 +72,16 @@ import javax.swing.WindowConstants;
 public class YoloAppose extends DynamicCommand implements Initializable
 {
 	
-	@Parameter
-    private LogService log;
-	
-	@Parameter(label = "Model path", style = "file")
-	private File modelPath; // path to the model
-	
-	@Parameter( label = "Confidence threshold", min="0.", description="Confidence threshold [0,1]" )
-	private double confidenceThreshold = 0.5; // confidence threshold
-	
-	@Parameter( label = "Slice height", min="10", description="Slice height (in pixels)" )
-	private int sliceHeight = 128; // slice height
-	
-	@Parameter( label = "Slice width", min="10", description="Slice width (in pixels)" )
-	private int sliceWidth = 128; // slice height
-	
-	@Parameter( label = "Overlap height ratio", min="0.05", description="Overlap height ratio (in %)" )
-	private double overlapHeightRatio = 0.2; // slice height
-	
-	@Parameter( label = "Overlap width ratio", min="0.05", description="Overlap width ratio (in %)" )
-	private double overlapWidthRatio = 0.2; // slice height
+	/*
+	 * This is inputs of the GUI 
+	 */
+	private String modelPath; // absolute path to the YOLO model
+	private double confidenceThreshold; // confidence score used to pass to YOLO
+	private boolean isSlicing; // if True, then activate slice inference with SAHI
+	private int sliceHeight; // slicing height 
+	private int sliceWidth; // slicing width
+	private double overlapHeightRatio; // overlapping ratio in height
+	private double overlapWidthRatio; // overlapping ratio in width
 	
 	@Override
 	public void initialize() {
@@ -96,7 +97,73 @@ public class YoloAppose extends DynamicCommand implements Initializable
 	@Override
 	public void run()
 	{
-		// Grab the current image.
+		
+		/*
+		 * Build GUI via GenericDialog
+		 */
+		GenericDialog gd = new GenericDialog("Yolo-Appose");
+		
+		gd.addFileField("Model path:", "", 30);
+		gd.addNumericField("Confidence threshold:", 0.50, 2);
+		
+		gd.addCheckbox("Slicing options", false);
+		
+		// Track components before adding optional fields
+        int countBefore = gd.getComponentCount();
+		
+		gd.addNumericField("Slice height", 128, 0);
+		gd.addNumericField("Slice width", 128, 0);
+		gd.addNumericField("Overlap height ratio", 0.2, 1);
+		gd.addNumericField("Overlap width ratio", 0.2, 1);
+		
+		// Track components after adding optional fields
+        int countAfter = gd.getComponentCount();
+		
+        // Collect all optional components
+        List<Component> optionalComponents = new ArrayList<>();
+        for (int i = countBefore; i < countAfter; i++) {
+            optionalComponents.add(gd.getComponent(i));
+        }
+
+        // Hide optional fields initially
+        for (Component comp : optionalComponents) {
+            comp.setVisible(false);
+        }
+        
+	    /* 
+	     * Get checkbox and add direct ItemListener
+	     */
+        Vector<?> checkboxes = gd.getCheckboxes();
+        Checkbox cb = (Checkbox) checkboxes.get(0);
+
+        cb.addItemListener(e -> {
+            boolean visible = cb.getState();
+            for (Component comp : optionalComponents) {
+                comp.setVisible(visible);
+            }
+            gd.pack();
+        });
+        
+        // Pack dialog to resize after hiding
+	    gd.pack();
+
+	    gd.showDialog();
+	    if (gd.wasCanceled()) return;
+	    
+	    /*
+	     * Pass values from GUI to variables (in the same order as added)
+	     */
+	    modelPath = gd.getNextString();
+	    confidenceThreshold = gd.getNextNumber();
+	    isSlicing = gd.getNextBoolean();
+	    sliceHeight = ( int ) gd.getNextNumber();
+	    sliceWidth = ( int ) gd.getNextNumber();
+	    overlapHeightRatio = gd.getNextNumber();
+	    overlapWidthRatio = gd.getNextNumber();
+		
+		/*
+		 * Grab the current image and run processing on it.
+		 */
 		final ImagePlus imp = WindowManager.getCurrentImage();
 		
 		try
@@ -109,7 +176,7 @@ public class YoloAppose extends DynamicCommand implements Initializable
 			IJ.error( "An error occurred: " + e.getMessage() );
 		}
 	}
-
+	
 	/*
 	 * Principle function to process image.
 	 */
@@ -197,8 +264,9 @@ public class YoloAppose extends DynamicCommand implements Initializable
 		 * Put other parameters to inputs
 		 */
 		
-		inputs.put( "model_path_apos", modelPath.getAbsolutePath() );
+		inputs.put( "model_path_apos", modelPath );
 		inputs.put( "confidence_threshold_apos", confidenceThreshold );
+		inputs.put( "is_slicing_apos", isSlicing );
 		inputs.put( "slice_height_apos", sliceHeight );
 		inputs.put( "slice_width_apos", sliceWidth );
 		inputs.put( "overlap_height_ratio_apos", overlapHeightRatio );
@@ -295,7 +363,6 @@ public class YoloAppose extends DynamicCommand implements Initializable
                 return;
             }
 			
-//			IJ.log("There are " + bboxes.size() + " objects found.");
 			
 			/*
 			 * Convert to bbox coordinates to ROIs and put into RoiManager.

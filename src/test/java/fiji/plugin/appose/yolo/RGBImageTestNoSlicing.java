@@ -3,7 +3,7 @@ package fiji.plugin.appose.yolo;
 import ij.IJ;
 import net.imagej.ImageJ;
 
-public class RGBImageTest
+public class RGBImageTestNoSlicing
 {
 	public static void main( final String[] args )
 	{
@@ -12,7 +12,7 @@ public class RGBImageTest
 	    ij.ui().showUI();
 
 	    // Open an image BEFORE running the plugin
-	    IJ.openImage("samples/sporozoite/sporozoite.tif").show();
+	    IJ.openImage("samples/sporozoite/sporozoite_crop.tif").show();
 
 	    // Run the plugin via ImageJ2 context (NOT new My_Plugin().run())
 	    ij.command().run(YoloAppose.class, true);

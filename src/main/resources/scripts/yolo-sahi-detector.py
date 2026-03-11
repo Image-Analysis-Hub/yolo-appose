@@ -2,6 +2,8 @@
 
 import numpy as np
 import tifffile
+
+from sahi.predict import get_prediction
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 
@@ -83,26 +85,44 @@ else:
     print(f"Image shape: {img.shape}")
 
 # TODO: user can specify using GPU or CPU or we can automatically detect GPU availability and use GPU if available.
+
+# Check if GPU is available and set device accordingly
+import torch
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+if appose_mode:
+    if device == "cuda:0":
+        task.update("GPU is available, using GPU for inference.")
+    else:        
+        task.update("GPU is not available, using CPU for inference.")
+
 detection_model = AutoDetectionModel.from_pretrained(
     model_type="ultralytics",
     model_path=model_path_apos, # model_path_apos is the input variable from Appose
     confidence_threshold=confidence_threshold_apos, # this can be choosed according to F1 curve
     # image_size=256, # important set it according to training image size
-    device="cuda:0",  # 'cpu' or 'cuda:0'
+    device=device,  # 'cpu' or 'cuda:0'
 )
 
 if appose_mode:
     task.update(f"Running YOLO from model at {model_path_apos}")
 
-# Run yolo-sahi detection
-result = detect_sporozoites_yolo(
-    model=detection_model,
-    image=img,
-    slice_height=slice_height_apos, 
-    slice_width=slice_width_apos, 
-    overlap_height_ratio=overlap_height_ratio_apos, 
-    overlap_width_ratio=overlap_width_ratio_apos
-)
+if is_slicing_apos:
+    
+    task.update(f"Using slicing with slice height {slice_height_apos}, slice width {slice_width_apos}, overlap height ratio {overlap_height_ratio_apos}, and overlap width ratio {overlap_width_ratio_apos}.")
+    
+    # Run yolo-sahi detection
+    result = detect_sporozoites_yolo(
+        model=detection_model,
+        image=img,
+        slice_height=slice_height_apos, 
+        slice_width=slice_width_apos, 
+        overlap_height_ratio=overlap_height_ratio_apos, 
+        overlap_width_ratio=overlap_width_ratio_apos
+    )
+else:
+    task.update(f"No slicing, entire image will be processed at once.")
+    result = get_prediction(img, detection_model)
 
 # # Get bbox results
 # bbox_label = np.zeros((img.shape[0], img.shape[1]), dtype=np.int16)
