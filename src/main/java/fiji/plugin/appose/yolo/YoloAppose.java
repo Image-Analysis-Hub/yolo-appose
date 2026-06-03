@@ -66,7 +66,7 @@ import javax.swing.WindowConstants;
 
 /*
  * This class implements Fiji plugin that calls native Python code with Appose.
- * The python code run YOLO from inputs given the Fiji plugin.
+ * The python code run YOLO from inputs given by the Fiji plugin.
  */
 @Plugin(type = Command.class, menuPath = "Plugins>Yolo-Appose")
 public class YoloAppose extends DynamicCommand implements Initializable
@@ -77,6 +77,7 @@ public class YoloAppose extends DynamicCommand implements Initializable
 	 */
 	private String modelPath; // absolute path to the YOLO model
 	private double confidenceThreshold; // confidence score used to pass to YOLO
+	private boolean toRGB; // if True, then convert gray scale image to RGB by duplicating
 	private boolean isSlicing; // if True, then activate slice inference with SAHI
 	private int sliceHeight; // slicing height 
 	private int sliceWidth; // slicing width
@@ -103,9 +104,15 @@ public class YoloAppose extends DynamicCommand implements Initializable
 		 */
 		GenericDialog gd = new GenericDialog("Yolo-Appose");
 		
+		gd.addMessage(
+		    "⚠ Limitations: only support 2D image (grayscale or RGB)",
+		    new Font("SansSerif", Font.PLAIN, 12),
+		    Color.BLUE
+		);
+		
 		gd.addFileField("Model path:", "", 30);
 		gd.addNumericField("Confidence threshold:", 0.50, 2);
-		
+		gd.addCheckbox("Convert to RGB if grayscale image", true );
 		gd.addCheckbox("Slicing options", false);
 		
 		// Track components before adding optional fields
@@ -134,7 +141,7 @@ public class YoloAppose extends DynamicCommand implements Initializable
 	     * Get checkbox and add direct ItemListener
 	     */
         Vector<?> checkboxes = gd.getCheckboxes();
-        Checkbox cb = (Checkbox) checkboxes.get(0);
+        Checkbox cb = (Checkbox) checkboxes.get(1); // Slicing option checkbox
 
         cb.addItemListener(e -> {
             boolean visible = cb.getState();
@@ -155,6 +162,7 @@ public class YoloAppose extends DynamicCommand implements Initializable
 	     */
 	    modelPath = gd.getNextString();
 	    confidenceThreshold = gd.getNextNumber();
+	    toRGB = gd.getNextBoolean();
 	    isSlicing = gd.getNextBoolean();
 	    sliceHeight = ( int ) gd.getNextNumber();
 	    sliceWidth = ( int ) gd.getNextNumber();
@@ -266,6 +274,7 @@ public class YoloAppose extends DynamicCommand implements Initializable
 		
 		inputs.put( "model_path_apos", modelPath );
 		inputs.put( "confidence_threshold_apos", confidenceThreshold );
+		inputs.put( "to_rgb_apos", toRGB );
 		inputs.put( "is_slicing_apos", isSlicing );
 		inputs.put( "slice_height_apos", sliceHeight );
 		inputs.put( "slice_width_apos", sliceWidth );
@@ -353,7 +362,7 @@ public class YoloAppose extends DynamicCommand implements Initializable
 			 */
 			
 			/**
-			 * Test getting bbox table
+			 * Getting bbox table
 			 */
 			@SuppressWarnings("unchecked")
             List<Map<String, Object>> bboxes = (List<Map<String, Object>>) task.outputs.get("bboxtable");
@@ -423,28 +432,36 @@ public class YoloAppose extends DynamicCommand implements Initializable
 	}
 	
 	private ImagePlus preprocess(ImagePlus imp) {
-		// TODO: update for movie
+		// Process image such that the image type must be grayscale or 3-channels composite image
 		
-	    if (imp.getType() != ImagePlus.COLOR_RGB) {
-	    	
-	        return imp;
-	    }
+		if ((imp.getNChannels() != 3) && (imp.getNChannels() != 1)) {
+			
+			String errorMsg = "Image must be RGB (3 channels) or grayscale (1 channel)";
+			IJ.error(errorMsg);
+			throw new IllegalArgumentException(errorMsg);
+		}
+		
+		if ((imp.getNChannels() == 1) && (imp.getType() == ImagePlus.COLOR_RGB)) {
+			
+			ImageStack stack = new ImageStack(imp.getWidth(), imp.getHeight());
+			
+		    ImagePlus[] channels = ChannelSplitter.split(imp);
+		    
+		    stack.addSlice("Red", channels[0].getProcessor());
+		    stack.addSlice("Green", channels[1].getProcessor());
+		    stack.addSlice("Blue", channels[2].getProcessor());
 
-	    IJ.log( "Image has type ColorRGB, convert to 3-channels composite image." );
+		    ImagePlus result = new ImagePlus(imp.getTitle(), stack);
+		    result.setDimensions(3, 1, 1);
+		    CompositeImage composite = new CompositeImage(result, CompositeImage.COMPOSITE);
+		    composite.setCalibration(imp.getCalibration()); // preserve spatial calibration
+
+		    return composite;
+		}
 	    
-	    ImagePlus[] channels = ChannelSplitter.split(imp);
+	    return imp;
 
-	    ImageStack stack = new ImageStack(imp.getWidth(), imp.getHeight());
-	    stack.addSlice("Red", channels[0].getProcessor());
-	    stack.addSlice("Green", channels[1].getProcessor());
-	    stack.addSlice("Blue", channels[2].getProcessor());
-
-	    ImagePlus result = new ImagePlus(imp.getTitle(), stack);
-	    result.setDimensions(3, 1, 1);
-	    CompositeImage composite = new CompositeImage(result, CompositeImage.COMPOSITE);
-	    composite.setCalibration(imp.getCalibration()); // preserve spatial calibration
-
-	    return composite;
+	    
 	}
 	
     private String loadResource(String path) throws IOException {

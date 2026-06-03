@@ -29,6 +29,9 @@
 /target/
 /.idea/
 
+# Vscode
+.vscode
+
 # Oss
 .DS_Store
 .pixi/*

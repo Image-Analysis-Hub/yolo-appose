@@ -1,4 +1,9 @@
 # YOLO-SAHI dectector
+# Author: Son PHAN IAH IP Pasteur
+# This script run YOLO detection with slicing option (via SAHI) and 
+# output detected bounding boxes as a table (list of dicts) for Fiji Roi via Appose. 
+# 
+
 
 import numpy as np
 import tifffile
@@ -11,12 +16,15 @@ from skimage import io
 from skimage import util as skutil
 from skimage.color import gray2rgb
 
+import torch
+
 report = print
 def listen(callback):
     global report
     report = callback
 
-def detect_sporozoites_yolo(model, image, slice_height=128, slice_width=128, overlap_height_ratio=0.2, overlap_width_ratio=0.2, savefig=False, outdir=None, filename=None, option="both"):
+def detect_yolo(model, image, slice_height=128, slice_width=128, overlap_height_ratio=0.2, overlap_width_ratio=0.2, savefig=False, outdir=None, filename=None, option="both"):
+    """Run YOLO detection with slicing option (via SAHI)."""
 
     result = get_sliced_prediction(
         image,
@@ -38,6 +46,7 @@ def detect_sporozoites_yolo(model, image, slice_height=128, slice_width=128, ove
 
     return result
 
+# =========================
 # MAIN PART 
 # =========================
 
@@ -45,13 +54,13 @@ def detect_sporozoites_yolo(model, image, slice_height=128, slice_width=128, ove
 appose_mode = 'task' in globals()
 if appose_mode:
     listen(task.update)
-else:
+else: # otherwise, make empty task
     from appose.python_worker import Task
     task = Task()
 
 def open_img(path_to_img):
     """Returns image reading from tifffile."""
-    # return tifffile.imread(path_to_img)
+
     return io.imread(path_to_img, plugin="tifffile")
 
 def flip_img(img):
@@ -76,20 +85,17 @@ if appose_mode:
     task.update(f"Image shape: {img.shape}")
 
     # If the image is grayscale, convert it to RGB by duplicating channels.
-    if img.ndim == 2:
+    if ((img.ndim == 2) & (to_rgb_apos)): # to_rgb_apos is the input variable from Appose
         img = gray2rgb(skutil.img_as_ubyte(img))
         task.update(f"Image is grayscale, converted to RGB: {img.shape}")
-else:
+
+else: # get images from local path for testing
     path_to_img = "/data/IAH/DevProjects/yolosahi-fiji/images/sporozoite.tif"
     img = open_img(path_to_img)
     print(f"Image shape: {img.shape}")
 
-# TODO: user can specify using GPU or CPU or we can automatically detect GPU availability and use GPU if available.
-
 # Check if GPU is available and set device accordingly
-import torch
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-
 if appose_mode:
     if device == "cuda:0":
         task.update("GPU is available, using GPU for inference.")
@@ -105,24 +111,25 @@ detection_model = AutoDetectionModel.from_pretrained(
 )
 
 if appose_mode:
+
     task.update(f"Running YOLO from model at {model_path_apos}")
 
-if is_slicing_apos:
-    
-    task.update(f"Using slicing with slice height {slice_height_apos}, slice width {slice_width_apos}, overlap height ratio {overlap_height_ratio_apos}, and overlap width ratio {overlap_width_ratio_apos}.")
-    
-    # Run yolo-sahi detection
-    result = detect_sporozoites_yolo(
-        model=detection_model,
-        image=img,
-        slice_height=slice_height_apos, 
-        slice_width=slice_width_apos, 
-        overlap_height_ratio=overlap_height_ratio_apos, 
-        overlap_width_ratio=overlap_width_ratio_apos
-    )
-else:
-    task.update(f"No slicing, entire image will be processed at once.")
-    result = get_prediction(img, detection_model)
+    if is_slicing_apos:
+        
+        task.update(f"Using slicing with slice height {slice_height_apos}, slice width {slice_width_apos}, overlap height ratio {overlap_height_ratio_apos}, and overlap width ratio {overlap_width_ratio_apos}.")
+        
+        # Run yolo-sahi detection
+        result = detect_yolo(
+            model=detection_model,
+            image=img,
+            slice_height=slice_height_apos, 
+            slice_width=slice_width_apos, 
+            overlap_height_ratio=overlap_height_ratio_apos, 
+            overlap_width_ratio=overlap_width_ratio_apos
+        )
+    else:
+        task.update(f"No slicing, entire image will be processed at once.")
+        result = get_prediction(img, detection_model)    
 
 # # Get bbox results
 # bbox_label = np.zeros((img.shape[0], img.shape[1]), dtype=np.int16)
