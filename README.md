@@ -16,5 +16,5 @@ To install the plugin, download and copy the `.jar` file in the `plugins` direct
 ## Usage
 
 From Fiji, open the image that you want to process.
-Launch the plugin from `Plugins>Yolo-Appose>Yolo Appose`.
+Launch the plugin from `Plugins>Yolo-Appose`.
 An interface will pop-up to let you choose the parameters to run YOLO.
